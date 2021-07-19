@@ -201,6 +201,10 @@ NOTRACE void __attribute__((noreturn)) runloop_internal()
     while ((t = dequeue(bhqueue)) != INVALID_ADDRESS)
         run_thunk(t);
 
+    // XXX revisit me - thinking is to allow bh processing on each pass
+    // through ints lest queues fill up
+    enable_interrupts();
+
     if (kern_try_lock()) {
         /* invoke expired timer callbacks */
         ci->state = cpu_kernel;

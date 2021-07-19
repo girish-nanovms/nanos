@@ -2477,6 +2477,7 @@ static void syscall_schedule(context f)
         thread_pause(current);
         runloop();
     }
+    enable_interrupts();
     syscall_debug(f);
 }
 

@@ -167,6 +167,7 @@ interrupt_entry:
 
 global frame_return
 frame_return:
+        cli                     ; XXX check
         mov [gs:8], rdi         ; save to ci->running_frame
         mov qword [rdi+FRAME_FULL*8], 0
         ; really flags

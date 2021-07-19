@@ -166,6 +166,9 @@ static inline void run_thread_frame(thread t)
 
     if (do_syscall_stats && t->last_syscall == SYS_sched_yield)
         count_syscall(t, 0);
+
+    /* actual context restore begins here; disable interrupts */
+    disable_interrupts();
     context f = thread_frame(t);
     cpuinfo ci = current_cpu();
     thread_frame_restore_tls(f);
@@ -177,6 +180,7 @@ static inline void run_thread_frame(thread t)
                f == t->sighandler_frame ? "sig handler" : "thread",
                current_cpu()->id, f, f[SYSCALL_FRAME_PC], f[SYSCALL_FRAME_SP], f[SYSCALL_FRAME_RETVAL1]);
     ci->frcount++;
+    current_cpu()->state = cpu_user;
     frame_return(f);
     halt("return from frame_return!\n");
 }
@@ -186,7 +190,7 @@ define_closure_function(1, 0, void, run_thread,
 {
     thread t = bound(t);
     dispatch_signals(t);
-    current_cpu()->state = cpu_user;
+    disable_interrupts();
     run_thread_frame(t);
 }
 
@@ -199,7 +203,6 @@ define_closure_function(1, 0, void, pause_thread,
 define_closure_function(1, 0, void, run_sighandler,
                         thread, t)
 {
-    current_cpu()->state = cpu_user;
     run_thread_frame(bound(t));
 }
 
@@ -219,7 +222,6 @@ static void setup_thread_frame(heap h, context frame, thread t)
 
 void thread_sleep_interruptible(void)
 {
-    disable_interrupts();
     assert(current->blocked_on);
     thread_log(current, "sleep interruptible (on \"%s\")", blockq_name(current->blocked_on));
     ftrace_thread_switch(current, 0);
@@ -230,7 +232,6 @@ void thread_sleep_interruptible(void)
 
 void thread_sleep_uninterruptible(void)
 {
-    disable_interrupts();
     assert(!current->blocked_on);
     current->blocked_on = INVALID_ADDRESS;
     thread_log(current, "sleep uninterruptible");
@@ -242,7 +243,6 @@ void thread_sleep_uninterruptible(void)
 
 void thread_yield(void)
 {
-    disable_interrupts();
     thread_log(current, "yield %d, RIP=0x%lx", current->tid, thread_frame(current)[SYSCALL_FRAME_PC]);
     assert(!current->blocked_on);
     current->syscall = -1;

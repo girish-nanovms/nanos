@@ -105,6 +105,7 @@ entry_invalid_el1:
 // universal frame return
 .globl frame_return
 frame_return:
+        msr     daifset, #2
         str     x0, [x18]       // set running_frame
         mov     x1, #0x0        // clear frame full condition
         str     x1, [x0, #(FRAME_FULL * 8)]
