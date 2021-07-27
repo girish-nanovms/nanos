@@ -147,9 +147,9 @@ static queued_signal dequeue_signal(thread t, u64 sigmask, boolean save_and_mask
 
     u64 mask = mask_from_sig(signum);
     sigstate ss = (sigstate_get_pending(&t->signals) & mask) ? &t->signals : &t->p->signals;
-    spin_lock(&ss->ss_lock);
+    u64 flags = spin_lock_irq(&ss->ss_lock);
     queued_signal qs = sigstate_dequeue_signal(ss, signum);
-    spin_unlock(&ss->ss_lock);
+    spin_unlock_irq(&ss->ss_lock, flags);
     assert(qs != INVALID_ADDRESS);
 
     sig_debug("-> selected sig %d, dequeued from %s\n",
@@ -176,13 +176,13 @@ static inline void free_queued_signal(queued_signal qs)
 void sigstate_flush_queue(sigstate ss)
 {
     sig_debug("sigstate %p\n", ss);
-    spin_lock(&ss->ss_lock);
+    u64 flags = spin_lock_irq(&ss->ss_lock);
     for (int signum = 1; signum <= NSIG; signum++) {
         list_foreach(sigstate_get_sighead(ss, signum), l) {
             free_queued_signal(struct_from_list(l, queued_signal, l));
         }
     }
-    spin_unlock(&ss->ss_lock);
+    spin_unlock_irq(&ss->ss_lock, flags);
 }
 
 void init_sigstate(sigstate ss)
@@ -209,7 +209,7 @@ static void deliver_signal(sigstate ss, struct siginfo *info)
     int sig = info->si_signo;
 
     /* Special handling for pending signals */
-    spin_lock(&ss->ss_lock);    
+    u64 flags = spin_lock_irq(&ss->ss_lock);
     if (sigstate_is_pending(ss, sig)) {
         /* If this is a timer event, attempt to find a queued info for
            this timer and update the info (overrun) instead of
@@ -236,28 +236,28 @@ static void deliver_signal(sigstate ss, struct siginfo *info)
                     sig_debug("timer update id %d, overrun %d\n",
                               qs->si.sifields.timer.tid,
                               qs->si.sifields.timer.overrun);
-                    spin_unlock(&ss->ss_lock);
+                    spin_unlock_irq(&ss->ss_lock, flags);
                     return;
                 }
             }
         }
 
         if (sig < RT_SIG_START) {
-            spin_unlock(&ss->ss_lock);
+            spin_unlock_irq(&ss->ss_lock, flags);
             /* Not queueable and no info update; ignore */
             sig_debug("already posted; ignore\n");
             return;
         }
     }
-    spin_unlock(&ss->ss_lock);
+    spin_unlock_irq(&ss->ss_lock, flags);
 
     queued_signal qs = allocate(h, sizeof(struct queued_signal));
     assert(qs != INVALID_ADDRESS);
     runtime_memcpy(&qs->si, info, sizeof(struct siginfo));
-    spin_lock(&ss->ss_lock);
+    spin_lock_irq(&ss->ss_lock);
     sigstate_set_pending(ss, sig);
     list_insert_before(sigstate_get_sighead(ss, info->si_signo), &qs->l);
-    spin_unlock(&ss->ss_lock);
+    spin_unlock_irq(&ss->ss_lock, flags);
     sig_debug("queued_signal %p, signo %d, errno %d, code %d\n",
               qs, qs->si.si_signo, qs->si.si_errno, qs->si.si_code);
     sig_debug("prev %p, next %p\n", qs->l.prev, qs->l.next);
@@ -350,9 +350,9 @@ void deliver_signal_to_process(process p, struct siginfo *info)
 
     /* Search for a runnable thread or one that can be woken up */
     thread can_wake = 0;
-    spin_lock(&p->threads_lock);
+    u64 flags = spin_lock_irq(&p->threads_lock);
     rbtree_traverse(p->threads, RB_INORDER, stack_closure(deliver_signal_handler, &can_wake, sigword));
-    spin_unlock(&p->threads_lock);
+    spin_unlock_irq(&p->threads_lock, flags);
 
     /* There's a chance a different thread could handle the pending process
        signal first, so this could cause a spurious wakeup (EINTR) ... care? */

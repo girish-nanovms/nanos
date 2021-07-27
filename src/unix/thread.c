@@ -314,13 +314,13 @@ thread create_thread(process p)
     init_refcount(&t->refcount, 1, init_closure(&t->free, free_thread, t));
     t->select_epoll = 0;
     runtime_memset((void *)&t->n, 0, sizeof(struct rbnode));
-    spin_lock(&p->threads_lock);
+    u64 flags = spin_lock_irq(&p->threads_lock);
     do {
         if (tidcount < 0)
             tidcount = 1;
         t->tid = tidcount++;
     } while (rbtree_lookup(p->threads, &t->n) != INVALID_ADDRESS);
-    spin_unlock(&p->threads_lock);
+    spin_unlock_irq(&p->threads_lock, flags);
     t->clear_tid = 0;
     t->name[0] = '\0';
 
@@ -353,9 +353,9 @@ thread create_thread(process p)
     list_init(&t->l_faultwait);
 
     // XXX sigframe
-    spin_lock(&p->threads_lock);
+    flags = spin_lock_irq(&p->threads_lock);
     rbtree_insert_node(p->threads, &t->n);
-    spin_unlock(&p->threads_lock);
+    spin_unlock_irq(&p->threads_lock, flags);
     return t;
   fail_affinity:
     deallocate_frame(t->sighandler_frame);
@@ -375,9 +375,9 @@ void exit_thread(thread t)
 {
     thread_log(current, "exit_thread");
 
-    spin_lock(&t->p->threads_lock);
+    u64 flags = spin_lock_irq(&t->p->threads_lock);
     rbtree_remove_by_key(t->p->threads, &t->n);
-    spin_unlock(&t->p->threads_lock);
+    spin_unlock_irq(&t->p->threads_lock, flags);
 
     /* We might be exiting from the signal handler while dispatching a
        signal on behalf of the process sigstate, so reset masks as if

@@ -535,9 +535,9 @@ static inline thread thread_from_tid(process p, int tid)
 {
     struct thread tk;
     tk.tid = tid;
-    spin_lock(&p->threads_lock);
+    u64 flags = spin_lock_irq(&p->threads_lock);
     rbnode n = rbtree_lookup(p->threads, &tk.n);
-    spin_unlock(&p->threads_lock);
+    spin_unlock_irq(&p->threads_lock, flags);
     if (n == INVALID_ADDRESS)
         return INVALID_ADDRESS;
     return struct_from_field(n, thread, n);

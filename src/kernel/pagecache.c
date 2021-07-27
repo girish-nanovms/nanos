@@ -82,27 +82,10 @@ static inline void pagelist_touch(pagelist pl, pagecache_page pp)
 }
 
 #ifdef KERNEL
-static inline void pagecache_lock_state(pagecache pc)
-{
-    spin_lock(&pc->state_lock);
-}
-
-static inline void pagecache_unlock_state(pagecache pc)
-{
-    spin_unlock(&pc->state_lock);
-}
-
-/* TODO revisit node locking */
-static inline void pagecache_lock_node(pagecache_node pn)
-{
-    spin_lock(&pn->pages_lock);
-}
-
-static inline void pagecache_unlock_node(pagecache_node pn)
-{
-    spin_unlock(&pn->pages_lock);
-}
-
+#define pagecache_lock_state(pc) u64 _flags = spin_lock_irq(&pc->state_lock)
+#define pagecache_unlock_state(pc) spin_unlock_irq(&pc->state_lock, _flags)
+#define pagecache_lock_node(pn) u64 _flags = spin_lock_irq(&pn->pages_lock)
+#define pagecache_unlock_node(pn) spin_unlock_irq(&pn->pages_lock, _flags)
 #else
 #define pagecache_lock_state(pc)
 #define pagecache_unlock_state(pc)
@@ -915,11 +898,14 @@ closure_function(2, 1, void, pagecache_commit_complete,
 static void pagecache_commit_dirty_pages(pagecache pc)
 {
     pagecache_debug("%s\n", __func__);
-    pagecache_lock_state(pc);
 
-    /* It might be more efficient to move these to a temporary list,
-       issue writes and then resolve on merge completion... */
-    list_foreach(&pc->dirty.l, l) {
+    do {
+        pagecache_lock_state(pc);
+        list l = list_get_next(&pc->dirty.l);
+        if (!l) {
+            pagecache_unlock_state(pc);
+            return;
+        }
         pagecache_page pp = struct_from_list(l, pagecache_page, l);
         sg_list sg = allocate_sg_list();
         assert(sg != INVALID_ADDRESS);
@@ -936,10 +922,7 @@ static void pagecache_commit_dirty_pages(pagecache pc)
         apply(pp->node->fs_write, sg,
               irangel(page_offset(pp) << pc->page_order, cache_pagesize(pc)),
               closure(pc->h, pagecache_commit_complete, pc, pp));
-
-        pagecache_lock_state(pc);
-    }
-    pagecache_unlock_state(pc);
+    } while (1);
 }
 
 static void pagecache_scan(pagecache pc)
