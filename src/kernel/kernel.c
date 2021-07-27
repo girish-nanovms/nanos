@@ -106,7 +106,9 @@ cpuinfo init_cpuinfo(heap backed, int cpu)
     init_cpuinfo_machine(ci, backed);
 
     /* frame and stacks */
-    set_kernel_context(ci, allocate_kernel_context(backed));
+    kernel_context kc = allocate_kernel_context(backed);
+    frame_enable_interrupts(kc->frame);
+    set_kernel_context(ci, kc);
 
     return ci;
 }
@@ -115,6 +117,7 @@ void init_kernel_contexts(heap backed)
 {
     spare_kernel_context = allocate_kernel_context(backed);
     assert(spare_kernel_context != INVALID_ADDRESS);
+    frame_enable_interrupts(spare_kernel_context->frame);
     cpuinfos = allocate_vector(backed, 1);
     assert(cpuinfos != INVALID_ADDRESS);
     cpuinfo ci = init_cpuinfo(backed, 0);

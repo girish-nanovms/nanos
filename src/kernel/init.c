@@ -375,6 +375,7 @@ void __attribute__((noreturn)) kernel_shutdown(int status)
 
     if (vector_length(shutdown_completions) > 0) {
         cpuinfo ci = current_cpu();
+        ci->state = cpu_kernel;
         if (ci->have_kernel_lock) {
             vector_foreach(shutdown_completions, h)
                 apply(h, status, m);

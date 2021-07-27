@@ -37,16 +37,9 @@ static struct spinlock kernel_lock;
 void kern_lock()
 {
     cpuinfo ci = current_cpu();
-    context f = get_running_frame(ci);
     assert(ci->state == cpu_kernel);
-
-    /* allow interrupt handling to occur while spinning */
-    u64 flags = irq_enable_save();
-    frame_enable_interrupts(f);
     spin_lock(&kernel_lock);
     ci->have_kernel_lock = true;
-    irq_restore(flags);
-    frame_disable_interrupts(f);
 }
 
 boolean kern_try_lock()
@@ -180,6 +173,15 @@ static void migrate_from_self(cpuinfo ci, u64 first_cpu, u64 ncpus)
     }
 }
 
+void sched_service_bhqueue(void)
+{
+    /* bhqueue is for operations outside the realm of the kernel lock,
+       e.g. storage I/O completions */
+    thunk t;
+    while ((t = dequeue(bhqueue)) != INVALID_ADDRESS)
+        run_thunk(t);
+}
+
 // should we ever be in the user frame here? i .. guess so?
 NOTRACE void __attribute__((noreturn)) runloop_internal()
 {
@@ -196,22 +198,18 @@ NOTRACE void __attribute__((noreturn)) runloop_internal()
     /* Make sure TLB entries are appropriately flushed before doing any work */
     page_invalidate_flush();
 
-    /* bhqueue is for operations outside the realm of the kernel lock,
-       e.g. storage I/O completions */
-    while ((t = dequeue(bhqueue)) != INVALID_ADDRESS)
-        run_thunk(t);
-
-    // XXX revisit me - thinking is to allow bh processing on each pass
-    // through ints lest queues fill up
-    enable_interrupts();
+    sched_service_bhqueue();
 
     if (kern_try_lock()) {
         /* invoke expired timer callbacks */
         ci->state = cpu_kernel;
         timer_service(runloop_timers, now(CLOCK_ID_MONOTONIC_RAW));
 
+        /* can be flexible here...but for now enable ints for major kernel tasks */
+        enable_interrupts();
         while ((t = dequeue(runqueue)) != INVALID_ADDRESS)
             run_thunk(t);
+        disable_interrupts();
 
         /* should be a list of per-runloop checks - also low-pri background */
         mm_service();

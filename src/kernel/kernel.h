@@ -124,6 +124,8 @@ NOTRACE static inline __attribute__((always_inline)) __attribute__((noreturn)) v
     while(1);                   /* kill warning */
 }
 
+void sched_service_bhqueue(void);
+
 #define BREAKPOINT_INSTRUCTION 00
 #define BREAKPOINT_WRITE 01
 #define BREAKPOINT_IO 10
