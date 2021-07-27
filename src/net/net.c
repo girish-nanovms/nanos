@@ -83,20 +83,6 @@ void lwip_deallocate(void *x)
     deallocate(lwip_heap, x, -1ull);
 }
 
-static void lwip_ext_callback(struct netif* netif, netif_nsc_reason_t reason,
-                              const netif_ext_callback_args_t* args)
-{
-    char ifname[4];
-    netif_name_cpy(ifname, netif);
-    if (reason & LWIP_NSC_IPV4_ADDRESS_CHANGED) {
-        u8 *n = (u8 *)&netif->ip_addr;
-        rprintf("%s: assigned %d.%d.%d.%d\n", ifname, n[0], n[1], n[2], n[3]);
-    }
-    if ((reason & LWIP_NSC_IPV6_ADDR_STATE_CHANGED) &&
-            (netif_ip6_addr_state(netif, args->ipv6_addr_state_changed.addr_index) & IP6_ADDR_VALID))
-        rprintf("%s: assigned %s\n", ifname, ipaddr_ntoa(args->ipv6_addr_state_changed.address));
-}
-
 u32_t lwip_rand(void)
 {
     return random_u64();
@@ -212,6 +198,10 @@ KLIB_EXPORT(netif_remove);
 
 #define MAX_IP6_ADDR_LEN    39
 
+static struct netif *default_iface = 0;
+static boolean net_trace = false;
+static tuple net_root = 0;
+
 static boolean get_config_addr(tuple root, symbol s, ip4_addr_t *addr)
 {
     string v = get_string(root, s);
@@ -226,7 +216,7 @@ static boolean get_config_addr(tuple root, symbol s, ip4_addr_t *addr)
     return false;
 }
 
-static boolean get_static_config(tuple t, struct netif *n, const char *ifname, boolean trace) {
+static boolean get_static_config(tuple t, struct netif *n, const char *ifname) {
     ip4_addr_t ip;
     ip4_addr_t netmask;
     ip4_addr_t gw;
@@ -247,7 +237,7 @@ static boolean get_static_config(tuple t, struct netif *n, const char *ifname, b
             ip4_addr_set_u32(&gw, ip_after_network);
     }
 
-    if (trace) {
+    if (net_trace) {
         rprintf("NET: static IP config for interface %s:\n", ifname);
         rprintf(" address\t%s\n", ip4addr_ntoa(&ip));
         rprintf(" netmask\t%s\n", ip4addr_ntoa(&netmask));
@@ -259,7 +249,7 @@ static boolean get_static_config(tuple t, struct netif *n, const char *ifname, b
     return true;
 }
 
-static boolean get_static_ip6_config(tuple t, struct netif *n, const char *ifname, boolean trace)
+static boolean get_static_ip6_config(tuple t, struct netif *n, const char *ifname)
 {
     string b = get_string(t, sym(ip6addr));
     if (b && (buffer_length(b) <= MAX_IP6_ADDR_LEN)) {
@@ -269,7 +259,7 @@ static boolean get_static_ip6_config(tuple t, struct netif *n, const char *ifnam
         str[len] = '\0';
         ip6_addr_t ip6;
         if (ip6addr_aton(str, &ip6)) {
-            if (trace)
+            if (net_trace)
                 rprintf("NET: static IPv6 address for interface %s: %s\n", ifname, str);
             netif_add_ip6_address(n, &ip6, 0);
             return true;
@@ -278,69 +268,101 @@ static boolean get_static_ip6_config(tuple t, struct netif *n, const char *ifnam
     return false;
 }
 
-void init_network_iface(tuple root) {
-    struct netif *n;
-    struct netif *default_iface = 0;
-    boolean trace = get(root, sym(trace)) != 0;
+static void configure_iface(struct netif *n)
+{
+    if (!net_root || netif_is_loopback(n))
+        return;
 
-    /* NETIF_FOREACH traverses interfaces in reverse order...so go by index */
-    for (int i = 1; (n = netif_get_by_index(i)); i++) {
-        if (netif_is_loopback(n))
-            continue;
+    char ifname[4];
+    netif_name_cpy(ifname, n);
 
-        char ifname[4];
-        netif_name_cpy(ifname, n);
+    tuple t = get_tuple(net_root, sym_this(ifname));
+    if (!t) {
+        /* If this is the first interface and there is no config tuple
+           under its name, default to looking for static config at the
+           root level. This usage is deprecated. */
+        if (!runtime_memcmp(ifname, "en1", 3))
+            t = net_root;
+    }
 
-        tuple t = get_tuple(root, sym_this(ifname));
-        if (!t) {
-            /* If this is the first interface and there is no config tuple
-               under its name, default to looking for static config at the
-               root level. This usage should be deprecated. */
-            if (!runtime_memcmp(ifname, "en1", 3))
-                t = root;
-        }
-
-        u64 mtu;
-        if (t) {
-            if (get_u64(t, sym(mtu), &mtu)) {
-                if (mtu < U64_FROM_BIT(16)) {
-                    if (trace)
-                        rprintf("NET: setting MTU for interface %s to %ld\n", ifname, mtu);
-                    n->mtu = mtu;
-                } else {
-                    rprintf("NET: invalid MTU %ld for interface %s; ignored\n", mtu, ifname);
-                }
-            }
-
-            if (get(t, sym(default))) {
-                rprintf("NET: setting interface %s as default\n", ifname);
-                default_iface = n;
+    u64 mtu;
+    if (t) {
+        if (get_u64(t, sym(mtu), &mtu)) {
+            if (mtu < U64_FROM_BIT(16)) {
+                if (net_trace)
+                    rprintf("NET: setting MTU for interface %s to %ld\n", ifname, mtu);
+                n->mtu = mtu;
+            } else {
+                rprintf("NET: invalid MTU %ld for interface %s; ignored\n", mtu, ifname);
             }
         }
 
-        n->output_ip6 = ethip6_output;
-        netif_create_ip6_linklocal_address(n, 1);
-        netif_set_flags(n, NETIF_FLAG_MLD6);
-        if (!default_iface)
+        if (get(t, sym(default))) {
+            rprintf("NET: setting interface %s as default\n", ifname);
             default_iface = n;
-
-        if (!t || !get_static_config(t, n, ifname, trace)) {
-            if (trace)
-                rprintf("NET: starting DHCP for interface %s\n", ifname);
-            dhcp_start(n);
-        }
-        if (!t || !get_static_ip6_config(t, n, ifname, trace)) {
-            if (trace)
-                rprintf("NET: starting DHCPv6 for interface %s\n", ifname);
-            dhcp6_enable_stateful(n);
+            netif_set_default(n);
         }
     }
 
+    n->output_ip6 = ethip6_output;
+    netif_create_ip6_linklocal_address(n, 1);
+    netif_set_flags(n, NETIF_FLAG_MLD6);
+    if (!default_iface) {
+        default_iface = n;
+        netif_set_default(n);
+    }
+
+    if (!t || !get_static_config(t, n, ifname)) {
+        if (net_trace)
+            rprintf("NET: starting DHCP for interface %s\n", ifname);
+        dhcp_start(n);
+    }
+    if (!t || !get_static_ip6_config(t, n, ifname)) {
+        if (net_trace)
+            rprintf("NET: starting DHCPv6 for interface %s\n", ifname);
+        dhcp6_enable_stateful(n);
+    }
+}
+
+void init_network_iface(tuple root)
+{
+    net_root = root;
+    net_trace = get(root, sym(trace)) != 0;
+
+    struct netif *n;
+    /* NETIF_FOREACH traverses interfaces in reverse order...so go by index */
+    for (int i = 1; (n = netif_get_by_index(i)); i++)
+        configure_iface(n);
+
+    // XXX timer? dev init finish notification?
+#if 0
     if (default_iface) {
         netif_set_default(default_iface);
     } else {
         rprintf("NET: no network interface found\n");
     }
+#endif
+}
+
+static void lwip_ext_callback(struct netif* netif, netif_nsc_reason_t reason,
+                              const netif_ext_callback_args_t* args)
+{
+    char ifname[4];
+    netif_name_cpy(ifname, netif);
+    if (reason & LWIP_NSC_NETIF_ADDED) {
+        configure_iface(netif);
+    }
+    if (reason & LWIP_NSC_NETIF_REMOVED) {
+        rprintf("%s: removed\n", ifname);
+        // XXX TODO
+    }
+    if (reason & LWIP_NSC_IPV4_ADDRESS_CHANGED) {
+        u8 *n = (u8 *)&netif->ip_addr;
+        rprintf("%s: assigned %d.%d.%d.%d\n", ifname, n[0], n[1], n[2], n[3]);
+    }
+    if ((reason & LWIP_NSC_IPV6_ADDR_STATE_CHANGED) &&
+            (netif_ip6_addr_state(netif, args->ipv6_addr_state_changed.addr_index) & IP6_ADDR_VALID))
+        rprintf("%s: assigned %s\n", ifname, ipaddr_ntoa(args->ipv6_addr_state_changed.address));
 }
 
 extern void lwip_init();

@@ -281,6 +281,7 @@ void common_handler(void)
     if (is_current_kernel_context(f)) {
         if (kern_return) {
             ci->state = cpu_kernel;
+            sched_service_bhqueue();
             frame_return(f);
         }
         f[FRAME_FULL] = false;      /* no longer saving frame for anything */

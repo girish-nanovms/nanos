@@ -2470,6 +2470,7 @@ static void syscall_schedule(context f)
 {
     /* kernel context set on syscall entry */
     current_cpu()->state = cpu_kernel;
+    enable_interrupts();
     if (!syscall_defer && !kernel_suspended())
         kern_lock();
     else if (!kern_try_lock()) {
@@ -2477,7 +2478,6 @@ static void syscall_schedule(context f)
         thread_pause(current);
         runloop();
     }
-    enable_interrupts();
     syscall_debug(f);
 }
 
