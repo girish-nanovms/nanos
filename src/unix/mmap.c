@@ -93,12 +93,13 @@ define_closure_function(1, 1, void, pending_fault_complete,
         pf_debug("   wake tid %d\n", t->tid);
         list_delete(l);
         if (!is_ok(s))
-            deliver_fault_signal(SIGBUS, t, pf->addr, BUS_ADRERR); /* XXX move to runqueue, or lock up */
+            deliver_fault_signal(SIGBUS, t, pf->addr, BUS_ADRERR);
         schedule_frame(thread_frame(t));
         refcount_release(&t->refcount);
     }
 
     if (pf->kern) {
+        pf_debug("   resume kern\n");
         assert(mmap_info.faulting_kernel_context);
         init_closure(&mmap_info.do_kernel_frame_return, kernel_frame_return, mmap_info.faulting_kernel_context);
         mmap_info.faulting_kernel_context = 0;
@@ -172,7 +173,7 @@ static boolean demand_anonymous_page(pending_fault pf, vmap vm, u64 vaddr)
 
 static void suspend_kernel(pending_fault pf)
 {
-    pf_debug("%s\n", __func__);
+    pf_debug("%s, cpu %d\n", __func__, current_cpu()->id);
     assert(!mmap_info.faulting_kernel_context);
     assert(current_cpu()->have_kernel_lock);
     mmap_info.faulting_kernel_context = suspend_kernel_context();
@@ -254,6 +255,7 @@ boolean do_demand_page(u64 vaddr, vmap vm, context frame)
     process p = t->p;
     u64 flags = spin_lock_irq(&p->faulting_lock);
     pending_fault pf = find_pending_fault_locked(p, page_addr);
+
     if (pf) {
         pf_debug("   found pending_fault %p\n", pf);
         if (in_kernel) {

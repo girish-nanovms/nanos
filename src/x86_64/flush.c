@@ -84,6 +84,7 @@ closure_function(0, 0, void, flush_handler)
     _flush_handler();
 }
 
+/* must be called with interrupts off */
 void page_invalidate_flush(void)
 {
     _flush_handler();
@@ -181,7 +182,7 @@ void page_invalidate_sync(flush_entry f, status_handler completion)
         list_push_back(&entries, &f->l);
         entries_count++;
         f->gen = fetch_and_add((word *)&inval_gen, 1) + 1;
-        spin_wunlock_irq(&flush_lock, flags);
+        spin_wunlock(&flush_lock);
 
         apic_ipi(TARGET_EXCLUSIVE_BROADCAST, ICR_ASSERT, flush_ipi);
         _flush_handler();

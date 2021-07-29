@@ -2465,18 +2465,22 @@ closure_function(0, 2, void, print_syscall_stats_cfn,
 
 static boolean syscall_defer;
 
+void serial_putchar(char c);
+
 // some validation can be moved up here
 static void syscall_schedule(context f)
 {
     /* kernel context set on syscall entry */
     current_cpu()->state = cpu_kernel;
-    enable_interrupts();
-    if (!syscall_defer && !kernel_suspended())
+    if (!syscall_defer && !kernel_suspended()) {
+        enable_interrupts();
         kern_lock();
-    else if (!kern_try_lock()) {
+    } else if (!kern_try_lock()) {
         enqueue_irqsafe(runqueue, &current->deferred_syscall);
         thread_pause(current);
         runloop();
+    } else {
+        enable_interrupts();
     }
     syscall_debug(f);
 }

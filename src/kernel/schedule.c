@@ -189,11 +189,11 @@ NOTRACE void __attribute__((noreturn)) runloop_internal()
     thunk t;
     boolean timer_updated = false;
 
-    sched_thread_pause();
-    disable_interrupts();
     sched_debug("runloop from %s b:%d r:%d t:%d%s\n", state_strings[ci->state],
                 queue_length(bhqueue), queue_length(runqueue), queue_length(ci->thread_queue),
                 ci->have_kernel_lock ? " locked" : "");
+    sched_thread_pause();
+    disable_interrupts();
     ci->state = cpu_kernel;
     /* Make sure TLB entries are appropriately flushed before doing any work */
     page_invalidate_flush();
