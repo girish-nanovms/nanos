@@ -103,7 +103,7 @@ define_closure_function(1, 1, void, pending_fault_complete,
         assert(mmap_info.faulting_kernel_context);
         init_closure(&mmap_info.do_kernel_frame_return, kernel_frame_return, mmap_info.faulting_kernel_context);
         mmap_info.faulting_kernel_context = 0;
-        enqueue_irqsafe(bhqueue, (thunk)&mmap_info.do_kernel_frame_return);
+        enqueue_irqsafe(frqueue, (thunk)&mmap_info.do_kernel_frame_return);
     }
 
     process p = pf->p;

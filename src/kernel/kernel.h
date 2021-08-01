@@ -124,7 +124,7 @@ NOTRACE static inline __attribute__((always_inline)) __attribute__((noreturn)) v
     while(1);                   /* kill warning */
 }
 
-void sched_service_bhqueue(void);
+void sched_service_queue(queue q);
 
 #define BREAKPOINT_INSTRUCTION 00
 #define BREAKPOINT_WRITE 01
@@ -192,6 +192,7 @@ _IRQSAFE_1(void *, queue_peek, queue);
 #endif
 
 typedef struct queue *queue;
+extern queue frqueue;
 extern queue bhqueue;
 extern queue runqueue;
 extern timerheap runloop_timers;
@@ -251,7 +252,6 @@ void kernel_delay(timestamp delta);
 
 void init_clock(void);
 
-void process_bhqueue();
 void install_fallback_fault_handler(fault_handler h);
 
 void msi_format(u32 *address, u32 *data, int vector);

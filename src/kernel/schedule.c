@@ -23,8 +23,9 @@ static int wakeup_vector;
 int shutdown_vector;
 boolean shutting_down;
 
-queue runqueue;                 /* kernel space from ?*/
-queue bhqueue;                  /* kernel from interrupt */
+queue frqueue;                  /* frame return queue */
+queue runqueue;                 /* kernel space, under lock*/
+queue bhqueue;                  /* unlocked kernel from interrupt */
 timerheap runloop_timers;
 bitmap idle_cpu_mask;
 timestamp last_timer_update;
@@ -173,12 +174,10 @@ static void migrate_from_self(cpuinfo ci, u64 first_cpu, u64 ncpus)
     }
 }
 
-void sched_service_bhqueue(void)
+void sched_service_queue(queue q)
 {
-    /* bhqueue is for operations outside the realm of the kernel lock,
-       e.g. storage I/O completions */
     thunk t;
-    while ((t = dequeue(bhqueue)) != INVALID_ADDRESS)
+    while ((t = dequeue(q)) != INVALID_ADDRESS)
         run_thunk(t);
 }
 
@@ -198,7 +197,12 @@ NOTRACE void __attribute__((noreturn)) runloop_internal()
     /* Make sure TLB entries are appropriately flushed before doing any work */
     page_invalidate_flush();
 
-    sched_service_bhqueue();
+    /* frame returns must be served from runloop */
+    sched_service_queue(frqueue);
+
+    /* bhqueue is for operations outside the realm of the kernel lock,
+       e.g. storage I/O completions */
+    sched_service_queue(bhqueue);
 
     if (kern_try_lock()) {
         /* invoke expired timer callbacks */
@@ -288,6 +292,7 @@ void init_scheduler(heap h)
     register_interrupt(shutdown_vector, closure(h, global_shutdown), "shutdown ipi");
     assert(wakeup_vector != INVALID_PHYSICAL);
     /* scheduling queues init */
+    frqueue = allocate_queue(h, 2048);
     runqueue = allocate_queue(h, 2048);
     bhqueue = allocate_queue(h, 2048);
     runloop_timers = allocate_timerheap(h, "runloop");
