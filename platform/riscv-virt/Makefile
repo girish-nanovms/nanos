@@ -22,6 +22,7 @@ SRCS-kernel.elf= \
 	$(SRCDIR)/gdb/gdbstub.c \
 	$(SRCDIR)/gdb/gdbtcp.c \
 	$(SRCDIR)/gdb/gdbutil.c \
+	$(SRCDIR)/http/http.c \
 	$(SRCDIR)/kernel/elf.c \
 	$(SRCDIR)/kernel/clock.c \
 	$(SRCDIR)/kernel/init.c \
@@ -130,7 +131,8 @@ INCLUDES=\
 	-I$(SRCDIR)/unix_process \
 	-I$(SRCDIR)/xen/public \
 	-I$(LWIPDIR)/src/include \
-	-I$(VDSO_OBJDIR)
+	-I$(VDSO_OBJDIR) \
+	-I$(OUTDIR)
 
 AFLAGS+=-I$(ARCHDIR) -march=rv64gc -mabi=lp64d
 
@@ -144,6 +146,12 @@ CFLAGS+= -DCONFIG_FTRACE -pg
 SRCS-kernel.elf+= \
 	$(SRCDIR)/unix/ftrace.c \
 	$(ARCHDIR)/ftrace.s
+endif
+
+ifeq ($(TRACE),tracelog)
+CFLAGS+= -DCONFIG_TRACELOG
+SRCS-kernel.elf+= \
+	$(SRCDIR)/kernel/tracelog.c
 endif
 
 ifeq ($(MANAGEMENT),telnet)
@@ -311,7 +319,7 @@ endif
 QEMU_TAP=	-netdev tap,id=n0,ifname=tap0,script=no,downscript=no
 #QEMU_NET=	-device $(NETWORK)$(NETWORK_BUS),mac=7e:b8:7e:87:4a:ea,netdev=n0,modern-pio-notify $(QEMU_TAP)
 QEMU_NET=	-device $(NETWORK)$(NETWORK_BUS),mac=7e:b8:7e:87:4a:ea,netdev=n0 $(QEMU_TAP)
-QEMU_USERNET=	-device $(NETWORK)$(NETWORK_BUS),netdev=n0 -netdev user,id=n0,hostfwd=tcp::8080-:8080,hostfwd=tcp::9090-:9090,hostfwd=udp::5309-:5309 -object filter-dump,id=filter0,netdev=n0,file=/tmp/nanos.pcap
+QEMU_USERNET=	-device $(NETWORK)$(NETWORK_BUS),netdev=n0 -netdev user,id=n0,hostfwd=tcp::8080-:8080,hostfwd=tcp::9090-:9090,hostfwd=tcp::9091-:9091,hostfwd=udp::5309-:5309 -object filter-dump,id=filter0,netdev=n0,file=/tmp/nanos.pcap
 ifneq ($(ENABLE_BALLOON),)
 QEMU_BALLOON=   -device virtio-balloon-pci
 endif
